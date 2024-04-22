@@ -1,3 +1,8 @@
 import chess
 
-print("hello world")
+def boardRepresentation(line):
+    board = chess.Board(line)
+    print(board)
+
+line=input()
+boardRepresentation(line)
