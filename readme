@@ -1,1 +1,10 @@
-test
+Reconnaissance Blind Chess
+--------------------------
+
+What is it?
+----------
+Build an agent to play RBC.
+
+Usage
+-----
+RBC is used in AI assess the AI's capability to make decisions in scenarios involving uncertainty.
