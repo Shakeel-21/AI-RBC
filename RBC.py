@@ -1,6 +1,8 @@
 import chess
 from reconchess import utilities, is_illegal_castle
-
+import chess.engine
+from collections import Counter
+import os
 
 def boardRepresentation(line):
     board = chess.Board(line)
@@ -98,4 +100,56 @@ def getInput():
     nextStateWithSense(lines, window)
 
 
-getInput()
+def predict_next_states_with_captures(fen, capture_square):
+    board = chess.Board(fen)
+    capture_moves = []
+
+    for move in board.legal_moves:
+        if move.to_square == chess.parse_square(capture_square) and board.is_capture(move):
+            board.push(move)
+            capture_moves.append(board.fen())
+            board.pop()
+
+    capture_moves.sort()
+    return capture_moves
+
+
+def select_common_move(fen_list):
+    engine_path = '/opt/stockfish/stockfish'  # Adjust this path as necessary
+
+    # Check if Stockfish executable exists at the specified path
+    if not os.path.exists(engine_path):
+        raise FileNotFoundError(f"Stockfish engine not found at {engine_path}")
+
+    with chess.engine.SimpleEngine.popen_uci(engine_path) as engine:
+        move_counter = Counter()
+        for fen in fen_list:
+            board = chess.Board(fen)
+            if board.is_checkmate():
+                move = list(board.legal_moves)[0]
+            else:
+                result = engine.play(board, chess.engine.Limit(time=0.5))
+                move = result.move
+            move_counter[move.uci()] += 1
+
+    most_common_move = sorted(move_counter.items(), key=lambda x: (-x[1], x[0]))[0][0]
+    return most_common_move
+
+
+def execute_move(fen, move):
+    # Create a board from the given FEN string
+    board = chess.Board(fen)
+
+    # Create a move object from the UCI string
+    chess_move = chess.Move.from_uci(move)
+
+    # Check if the move is legal and execute it
+    if chess_move in board.legal_moves:
+        board.push(chess_move)
+        return board.fen()
+    else:
+        return "Illegal move"
+
+
+line=input()
+nextStatePrediction(line)
