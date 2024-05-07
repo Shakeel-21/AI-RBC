@@ -151,5 +151,22 @@ def execute_move(fen, move):
         return "Illegal move"
 
 
+def moveGeneration(line):
+    board = chess.Board(line)
+    color = board.turn    
+
+    if board.is_check():
+        enemy_king_square = board.king(not color)
+        attackers = board.attackers(color, enemy_king_square)
+        if attackers:
+            attacker_square = attackers.pop()
+            print(chess.Move(attacker_square, enemy_king_square))
+
+    else:
+        engine = chess.engine.SimpleEngine.popen_uci('/opt/stockfish/stockfish', setpgrp=True)        
+        result = engine.play(board, chess.engine.Limit(time=0.5))
+        print(result.move.uci())
+        engine.quit()
+
 line=input()
-nextStatePrediction(line)
+moveGeneration(line)
