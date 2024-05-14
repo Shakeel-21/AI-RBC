@@ -54,7 +54,8 @@ class MyAgent(Player):
 
     def choose_move(self, move_actions, seconds_left):
         # execute a chess move
-        selected_move = select_common_move(self.possible_states, self.engine)
+        selected_move_uci = select_common_move(self.possible_states, self.engine)
+        selected_move = chess.Move.from_uci(selected_move_uci)
         return selected_move
 
     def handle_move_result(self, requested_move, taken_move, captured_opponent_piece, capture_square):
@@ -113,8 +114,6 @@ def nextStatePrediction(line):
 
 
 def nextStateWithSense(lines, window):
-    print(lines)
-    print(window)
     entries = []
     # this is where lines are extracted and labeled
     for i, line in enumerate(lines):
@@ -185,7 +184,11 @@ def predict_next_states_with_captures(fen, capture_square):
     return capture_moves
 
 
-def select_common_move(fen_list,engine1):
+def select_common_move(fen_list, engine1):
+    max_states = 10000
+    if len(fen_list) > max_states:
+        fen_list = random.sample(fen_list, max_states)
+
     with engine1 as engine:
         move_counter = Counter()
         for fen in fen_list:
@@ -193,8 +196,13 @@ def select_common_move(fen_list,engine1):
             if board.is_checkmate():
                 move = list(board.legal_moves)[0]
             else:
-                result = engine.play(board, chess.engine.Limit(time=10/len(fen_list)))
-                move = result.move
+                try:
+                    result = engine.play(board, chess.engine.Limit(time=max(1, 10/len(fen_list))))
+                    move = result.move
+                except chess.engine.EngineTerminatedError:
+                    # Handle engine termination gracefully
+                    move = random.choice(list(board.legal_moves))  # Select a random legal move
+                    print("Engine terminated unexpectedly. Selecting a random move.")
             move_counter[move.uci()] += 1
 
     most_common_move = sorted(move_counter.items(), key=lambda x: (-x[1], x[0]))[0][0]
@@ -213,7 +221,7 @@ def execute_move(fen, move):
         board.push(chess_move)
         return board.fen()
     else:
-        return "Illegal move"
+        return fen
 
 
 def moveGeneration(line,engine):
