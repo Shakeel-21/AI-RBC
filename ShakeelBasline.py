@@ -8,32 +8,25 @@ import random
 
 class MyAgent(Player):
     def __init__(self):
-        # setup agent as you see fit
         self.board = None
         self.color = None
         self.opponent = None
         self.possible_states = []
         self.engine = chess.engine.SimpleEngine.popen_uci('./opt/stockfish/stockfish', setpgrp=True)
-        pass
 
     def handle_game_start(self, color, board, opponent_name):
-        # function that is run when the game starts
         self.board = board
         self.color = color
         self.opponent = opponent_name
         self.possible_states = [board.fen()]
-        pass
 
     def handle_opponent_move_result(self, captured_my_piece, capture_square):
-        # feedback on whether the opponent captured a piece
         if captured_my_piece:
             self.possible_states = predict_next_states_with_captures(self.possible_states, capture_square)
         else:
-            self.possible_states = [nextStatePrediction(state) for state in self.possible_states]
-        pass
+            self.possible_states = [next_state for state in self.possible_states for next_state in nextStatePrediction(state)]
 
     def choose_sense(self, sense_actions, move_actions, seconds_left):
-        # write code here to select a sensing move
         valid_sense_actions = [square for square in sense_actions if square not in [
             chess.A1, chess.A2, chess.A3, chess.A4, chess.A5, chess.A6, chess.A7, chess.A8,
             chess.B1, chess.B8,
@@ -52,216 +45,115 @@ class MyAgent(Player):
         self.possible_states = [state for fen in self.possible_states for state in
                                 nextStateWithSense(fen, window)]
 
-    def choose_move(self, move_actions: List[chess.Move], seconds_left: float) -> Optional[chess.Move]:
-        # Limit the number of board states to 10000
-        if len(self.possible_states) > 10000:
-            self.possible_states = set(random.sample(list(self.possible_states), 10000))
+    def choose_move(self, move_actions, seconds_left):
+        max_states = 1000  # Limit the number of states to consider
+        if len(self.possible_states) > max_states:
+            self.possible_states = random.sample(self.possible_states, max_states)
 
-
-        suggested_moves = []
-        for state in self.possible_states:
-            board = chess.Board(state)
-            board.turn = self.color
-
-            # Select the best move using Stockfish with a time limit
-            time_limit = 10 / len(self.possible_states)
-            result = self.engine.play(board, chess.engine.Limit(time=time_limit))
-            suggested_moves.append(result.move.uci())
-
-        # Filter the suggested moves to only include valid moves from move_actions
-        valid_moves = [move for move in suggested_moves if chess.Move.from_uci(move) in self.possible_states]
-
-        # Count the occurrences of each valid move
-        move_counts = Counter(valid_moves)
-
-        # Select the most common valid move
-        if move_counts:
-            best_move = max(move_counts, key=move_counts.get)
-            return chess.Move.from_uci(best_move)
-        else:
-            return None
-
-    def handle_move_result(self, requested_move, taken_move, captured_opponent_piece, capture_square):
-        # this function is called after your move is executed.
-        if captured_opponent_piece:
-            self.possible_states = predict_next_states_with_captures(self.possible_states, capture_square)
-        else:
-            if taken_move != None:
-                self.possible_states = [execute_move(state, taken_move.uci()) for state in self.possible_states]
-        pass
-
-    def handle_game_end(self, winner_color, win_reason, game_history):
-        # shut down everything at the end of the game
-        self.engine.quit()
-        pass
-
-
-def boardRepresentation(line):
-    board = chess.Board(line)
-    print(board)
-
-
-def nextMovePrediction(line):
-  board = chess.Board(line)
-  possible_moves = list(board.pseudo_legal_moves) + [chess.Move.null()]
-
-  if board.castling_rights:
-    for move in utilities.without_opponent_pieces(board).generate_castling_moves():
-      possible_moves.append(move) if not is_illegal_castle(board, move) else None
-
-  possible_moves = list(set(possible_moves))
-  list=[]
-  for move in sorted(possible_moves, key=lambda move: move.uci()):
-    list.append(move)
-  return list
-
-
-
-def nextStatePrediction(line):
-    board = chess.Board(line)
-    moves = list(board.pseudo_legal_moves) + [chess.Move.null()]
-    next_positions = []
-
-    if board.castling_rights:
-        for move in utilities.without_opponent_pieces(board).generate_castling_moves():
-            moves.append(move) if not is_illegal_castle(board, move) else None
-
-    for move in moves:
-        temp_board = board.copy()
-        temp_board.push(move)
-        next_positions.append(temp_board.fen())
-    next_positions.sort()
-    lists=[]
-    for position in next_positions:
-        lists.append(position)
-    return lists
-
-
-def nextStateWithSense(lines, window):
-    entries = []
-    # this is where lines are extracted and labeled
-    for i, line in enumerate(lines):
-        rows = line.split('/')
-        rows[len(rows) - 1] = rows[len(rows) - 1].split()[0]
-        # converts numbers to ?s
-        expandedRows = []
-        for row in rows:
-            modified_row = ''
-            for char in row:
-                if char.isdigit():
-                    modified_row += '?' * int(char)
-                else:
-                    modified_row += char
-            expandedRows.append(modified_row)
-        # adds converted rows and their labeles
-        entries.append([expandedRows, i])
-
-    # splits the window into the squares
-    view = window.split(';')
-    pairs = []
-    for square in view:
-        pairs.append(square.split(':'))
-
-    # gets the coords from the suares and finds match in the FEN
-    for pair in pairs:
-        location = pair[0]
-        piece = pair[1]
-        letter = location[0]
-        number = location[1]
-
-        for line in entries:
-            row = line[0][abs(int(number) - 8)]
-            if row[ord(letter) - ord('a')] != piece:
-                entries.remove(line)
-
-    # saves the equivalent original string from the labels
-    outputs = []
-    for s in entries:
-        outputs.append(lines[s[1]])
-    outputs.sort()
-    return outputs
-
-
-# Used to allow the function to take in the correct parameters while still only adding one line of code
-def getInput():
-    num = input()
-    lines = []
-    for i in range(int(num)):
-        line = input()
-        lines.append(line)
-    window = input()
-    # where the actual function is called
-    nextStateWithSense(lines, window)
-
-
-def predict_next_states_with_captures(fen, capture_square):
-    board = chess.Board(fen)
-    capture_moves = []
-
-    for move in board.legal_moves:
-        if move.to_square == chess.parse_square(capture_square) and board.is_capture(move):
-            board.push(move)
-            capture_moves.append(board.fen())
-            board.pop()
-
-    capture_moves.sort()
-    return capture_moves
-
-
-def select_common_move(fen_list, engine1):
-    max_states = 10000
-    if len(fen_list) > max_states:
-        fen_list = random.sample(fen_list, max_states)
-
-    with engine1 as engine:
         move_counter = Counter()
-        for fen in fen_list:
+        for fen in self.possible_states:
             board = chess.Board(fen)
             if board.is_checkmate():
                 move = list(board.legal_moves)[0]
             else:
                 try:
-                    result = engine.play(board, chess.engine.Limit(time=max(1, 10/len(fen_list))))
+                    # Adjust the time limit based on the number of states and remaining time
+                    time_limit = min(1, seconds_left / len(self.possible_states))
+                    result = self.engine.play(board, chess.engine.Limit(time=time_limit), info=chess.engine.INFO_SCORE)
                     move = result.move
                 except chess.engine.EngineTerminatedError:
                     # Handle engine termination gracefully
-                    move = random.choice(list(board.legal_moves))  # Select a random legal move
-                    print("Engine terminated unexpectedly. Selecting a random move.")
+                    move = random.choice(list(board.legal_moves))
             move_counter[move.uci()] += 1
 
-    most_common_move = sorted(move_counter.items(), key=lambda x: (-x[1], x[0]))[0][0]
-    return most_common_move
+        valid_moves = [move for move in move_counter if chess.Move.from_uci(move) in move_actions]
+
+        if valid_moves:
+            most_common_move = max(valid_moves, key=move_counter.get)
+            return chess.Move.from_uci(most_common_move)
+        else:
+            # If no valid moves are found, choose a random move from the legal moves
+            return random.choice(move_actions)
+    def handle_move_result(self, requested_move, taken_move, captured_opponent_piece, capture_square):
+        if captured_opponent_piece:
+            self.possible_states = predict_next_states_with_captures(self.possible_states, capture_square)
+        else:
+            if taken_move:
+                self.possible_states = [execute_move(state, taken_move.uci()) for state in self.possible_states]
+            else:
+                self.possible_states = [state for state in self.possible_states if state == self.board.fen()]
+
+    def handle_game_end(self, winner_color, win_reason, game_history):
+        self.engine.quit()
+        if winner_color == self.color:
+            print("Game Over. I won!")
+        elif winner_color is None:
+            print("Game Over. It was a draw.")
+        else:
+            print("Game Over. I lost.")
+
+
+def nextStatePrediction(fen):
+    board = chess.Board(fen)
+    next_positions = []
+
+    for move in board.legal_moves:
+        temp_board = board.copy()
+        temp_board.push(move)
+        next_positions.append(temp_board.fen())
+
+    next_positions.sort()
+    return next_positions
+
+
+def nextStateWithSense(fen, window):
+    board = chess.Board(fen)
+    rows = fen.split('/')
+    rows[-1] = rows[-1].split()[0]
+
+    expanded_rows = []
+    for row in rows:
+        expanded_row = ''
+        for char in row:
+            if char.isdigit():
+                expanded_row += '?' * int(char)
+            else:
+                expanded_row += char
+        expanded_rows.append(expanded_row)
+
+    view = window.split(';')
+    pairs = [square.split(':') for square in view]
+
+    for pair in pairs:
+        location = pair[0]
+        piece = pair[1]
+        letter = location[0]
+        number = location[1]
+        row = expanded_rows[abs(int(number) - 8)]
+        if row[ord(letter) - ord('a')] != piece:
+            return []
+
+    return [fen]
+
+
+def predict_next_states_with_captures(fen_list, capture_square):
+    capture_moves = []
+    for fen in fen_list:
+        board = chess.Board(fen)
+        for move in board.legal_moves:
+            if move.to_square == chess.parse_square(capture_square) and board.is_capture(move):
+                board.push(move)
+                capture_moves.append(board.fen())
+                board.pop()
+    capture_moves.sort()
+    return capture_moves
 
 
 def execute_move(fen, move):
-    # Create a board from the given FEN string
     board = chess.Board(fen)
-
-    # Create a move object from the UCI string
     chess_move = chess.Move.from_uci(move)
-
-    # Check if the move is legal and execute it
     if chess_move in board.legal_moves:
         board.push(chess_move)
         return board.fen()
     else:
         return fen
-
-
-def moveGeneration(line,engine):
-    board = chess.Board(line)
-    color = board.turn    
-
-    if board.is_check():
-        enemy_king_square = board.king(not color)
-        attackers = board.attackers(color, enemy_king_square)
-        if attackers:
-            attacker_square = attackers.pop()
-            return chess.Move(attacker_square, enemy_king_square)
-
-    else:
-
-        result = engine.play(board, chess.engine.Limit(time=0.35))
-        return result.move.uci()
-
-
