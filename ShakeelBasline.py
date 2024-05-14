@@ -76,7 +76,8 @@ class MyAgent(Player):
             return random.choice(move_actions)
     def handle_move_result(self, requested_move, taken_move, captured_opponent_piece, capture_square):
         if captured_opponent_piece:
-            self.possible_states = predict_next_states_with_captures(self.possible_states, capture_square)
+            capture_square_name = chess.SQUARE_NAMES[capture_square]
+            self.possible_states = predict_next_states_with_captures(self.possible_states, capture_square_name)
         else:
             if taken_move:
                 self.possible_states = [execute_move(state, taken_move.uci()) for state in self.possible_states]
