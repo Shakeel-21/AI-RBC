@@ -52,18 +52,42 @@ class MyAgent(Player):
         self.possible_states = [state for fen in self.possible_states for state in
                                 nextStateWithSense(fen, window)]
 
-    def choose_move(self, move_actions, seconds_left):
-        # execute a chess move
-        selected_move_uci = select_common_move(self.possible_states, self.engine)
-        selected_move = chess.Move.from_uci(selected_move_uci)
-        return selected_move
+    def choose_move(self, move_actions: List[chess.Move], seconds_left: float) -> Optional[chess.Move]:
+        # Limit the number of board states to 10000
+        if len(self.possible_states) > 10000:
+            self.possible_states = set(random.sample(list(self.possible_states), 10000))
+
+
+        suggested_moves = []
+        for state in self.possible_states:
+            board = chess.Board(state)
+            board.turn = self.color
+
+            # Select the best move using Stockfish with a time limit
+            time_limit = 10 / len(self.possible_states)
+            result = self.engine.play(board, chess.engine.Limit(time=time_limit))
+            suggested_moves.append(result.move.uci())
+
+        # Filter the suggested moves to only include valid moves from move_actions
+        valid_moves = [move for move in suggested_moves if chess.Move.from_uci(move) in self.possible_states]
+
+        # Count the occurrences of each valid move
+        move_counts = Counter(valid_moves)
+
+        # Select the most common valid move
+        if move_counts:
+            best_move = max(move_counts, key=move_counts.get)
+            return chess.Move.from_uci(best_move)
+        else:
+            return None
 
     def handle_move_result(self, requested_move, taken_move, captured_opponent_piece, capture_square):
         # this function is called after your move is executed.
         if captured_opponent_piece:
             self.possible_states = predict_next_states_with_captures(self.possible_states, capture_square)
         else:
-            self.possible_states = [execute_move(state, taken_move.uci()) for state in self.possible_states]
+            if taken_move != None:
+                self.possible_states = [execute_move(state, taken_move.uci()) for state in self.possible_states]
         pass
 
     def handle_game_end(self, winner_color, win_reason, game_history):
