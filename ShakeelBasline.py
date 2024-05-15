@@ -22,9 +22,11 @@ class MyAgent(Player):
 
     def handle_opponent_move_result(self, captured_my_piece, capture_square):
         if captured_my_piece:
-            self.possible_states = predict_next_states_with_captures(self.possible_states, capture_square)
+            capture_square_name = chess.SQUARE_NAMES[capture_square]
+            self.possible_states = predict_next_states_with_captures(self.possible_states, capture_square_name)
         else:
-            self.possible_states = [next_state for state in self.possible_states for next_state in nextStatePrediction(state)]
+            self.possible_states = [next_state for state in self.possible_states for next_state in
+                                    nextStatePrediction(state)]
 
     def choose_sense(self, sense_actions, move_actions, seconds_left):
         valid_sense_actions = [square for square in sense_actions if square not in [
@@ -141,11 +143,16 @@ def predict_next_states_with_captures(fen_list, capture_square):
     capture_moves = []
     for fen in fen_list:
         board = chess.Board(fen)
-        for move in board.legal_moves:
-            if move.to_square == chess.parse_square(capture_square) and board.is_capture(move):
-                board.push(move)
-                capture_moves.append(board.fen())
-                board.pop()
+        try:
+            capture_square_index = chess.parse_square(capture_square)
+            for move in board.legal_moves:
+                if move.to_square == capture_square_index and board.is_capture(move):
+                    board.push(move)
+                    capture_moves.append(board.fen())
+                    board.pop()
+        except ValueError:
+            # Handle invalid capture_square gracefully
+            pass
     capture_moves.sort()
     return capture_moves
 
