@@ -1,4 +1,4 @@
-import chess
+
 from reconchess import *
 import chess.engine
 from collections import Counter
@@ -29,16 +29,17 @@ class MyAgent(Player):
                                     nextStatePrediction(state)]
 
     def choose_sense(self, sense_actions, move_actions, seconds_left):
-        valid_sense_actions = [square for square in sense_actions if square not in [
-            chess.A1, chess.A2, chess.A3, chess.A4, chess.A5, chess.A6, chess.A7, chess.A8,
-            chess.B1, chess.B8,
-            chess.C1, chess.C8,
-            chess.D1, chess.D8,
-            chess.E1, chess.E8,
-            chess.F1, chess.F8,
-            chess.G1, chess.G8,
-            chess.H1, chess.H2, chess.H3, chess.H4, chess.H5, chess.H6, chess.H7, chess.H8
-        ]]
+        valid_sense_actions = [square for square in sense_actions if square not in chess.SquareSet(
+            chess.BB_RANK_1 | chess.BB_RANK_8 | chess.BB_FILE_A | chess.BB_FILE_H)]
+
+        # Get the last moved piece by either player
+        last_move = self.board.peek() if self.board.move_stack else None
+
+        if last_move and last_move.to_square in valid_sense_actions:
+            # If the last move is in the valid sense actions, sense that square
+            return last_move.to_square
+
+        # If no last move or the last move is not in the valid sense actions, choose a random sense action
         return random.choice(valid_sense_actions)
 
     def handle_sense_result(self, sense_result):
@@ -48,31 +49,33 @@ class MyAgent(Player):
                                 nextStateWithSense(fen, window)]
 
     def choose_move(self, move_actions, seconds_left):
-        max_states = 1000  # Limit the number of states to consider
+        max_states = 10000  # Limit the number of states to consider
         if len(self.possible_states) > max_states:
             self.possible_states = random.sample(self.possible_states, max_states)
 
-        move_counter = Counter()
+        move_scores = {}
         for fen in self.possible_states:
             board = chess.Board(fen)
-            if board.is_checkmate():
-                move = list(board.legal_moves)[0]
-            else:
-                try:
-                    # Adjust the time limit based on the number of states and remaining time
-                    time_limit = min(1, seconds_left / len(self.possible_states))
-                    result = self.engine.play(board, chess.engine.Limit(time=time_limit), info=chess.engine.INFO_SCORE)
-                    move = result.move
-                except chess.engine.EngineTerminatedError:
-                    # Handle engine termination gracefully
-                    move = random.choice(list(board.legal_moves))
-            move_counter[move.uci()] += 1
+            for move in board.legal_moves:
+                score = 0
+                if board.is_capture(move):
+                    captured_piece = board.piece_at(move.to_square)
+                    if captured_piece and captured_piece.piece_type == chess.KING:
+                        # Prioritize capturing the opponent's king
+                        score += 1000
+                if board.is_check():
+                    # Prioritize moves that make the king evade capture
+                    if board.turn == self.color:
+                        score += 100
+                    else:
+                        score -= 100
+                move_scores[move.uci()] = move_scores.get(move.uci(), 0) + score
 
-        valid_moves = [move for move in move_counter if chess.Move.from_uci(move) in move_actions]
+        valid_moves = [move for move in move_scores if chess.Move.from_uci(move) in move_actions]
 
         if valid_moves:
-            most_common_move = max(valid_moves, key=move_counter.get)
-            return chess.Move.from_uci(most_common_move)
+            best_move = max(valid_moves, key=move_scores.get)
+            return chess.Move.from_uci(best_move)
         else:
             # If no valid moves are found, choose a random move from the legal moves
             return random.choice(move_actions)
@@ -140,20 +143,20 @@ def nextStateWithSense(fen, window):
 
 
 def predict_next_states_with_captures(fen_list, capture_square):
-    capture_moves = []
+    capture_moves = set()
     for fen in fen_list:
         board = chess.Board(fen)
         try:
             capture_square_index = chess.parse_square(capture_square)
-            for move in board.legal_moves:
+            for move in board.generate_legal_captures():
                 if move.to_square == capture_square_index and board.is_capture(move):
                     board.push(move)
-                    capture_moves.append(board.fen())
+                    capture_moves.add(board.fen())
                     board.pop()
         except ValueError:
             # Handle invalid capture_square gracefully
             pass
-    capture_moves.sort()
+
     return capture_moves
 
 
