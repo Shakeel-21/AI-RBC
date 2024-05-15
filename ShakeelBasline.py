@@ -1,8 +1,6 @@
-
 from reconchess import *
 import chess.engine
-from collections import Counter
-import os
+
 import random
 
 
@@ -11,14 +9,14 @@ class MyAgent(Player):
         self.board = None
         self.color = None
         self.opponent = None
-        self.possible_states = []
+        self.possible_states = set()
         self.engine = chess.engine.SimpleEngine.popen_uci('./opt/stockfish/stockfish', setpgrp=True)
 
     def handle_game_start(self, color, board, opponent_name):
         self.board = board
         self.color = color
         self.opponent = opponent_name
-        self.possible_states = [board.fen()]
+        self.possible_states = {board.fen()}
 
     def handle_opponent_move_result(self, captured_my_piece, capture_square):
         if captured_my_piece:
@@ -63,6 +61,10 @@ class MyAgent(Player):
                     if captured_piece and captured_piece.piece_type == chess.KING:
                         # Prioritize capturing the opponent's king
                         score += 1000
+                    elif captured_piece and captured_piece.piece_type != chess.PAWN:
+                        score += 500
+                    else:
+                        score += 400
                 if board.is_check():
                     # Prioritize moves that make the king evade capture
                     if board.turn == self.color:
@@ -79,6 +81,7 @@ class MyAgent(Player):
         else:
             # If no valid moves are found, choose a random move from the legal moves
             return random.choice(move_actions)
+
     def handle_move_result(self, requested_move, taken_move, captured_opponent_piece, capture_square):
         if captured_opponent_piece:
             capture_square_name = chess.SQUARE_NAMES[capture_square]
@@ -114,32 +117,16 @@ def nextStatePrediction(fen):
 
 def nextStateWithSense(fen, window):
     board = chess.Board(fen)
-    rows = fen.split('/')
-    rows[-1] = rows[-1].split()[0]
-
-    expanded_rows = []
-    for row in rows:
-        expanded_row = ''
-        for char in row:
-            if char.isdigit():
-                expanded_row += '?' * int(char)
-            else:
-                expanded_row += char
-        expanded_rows.append(expanded_row)
-
-    view = window.split(';')
-    pairs = [square.split(':') for square in view]
-
-    for pair in pairs:
-        location = pair[0]
-        piece = pair[1]
-        letter = location[0]
-        number = location[1]
-        row = expanded_rows[abs(int(number) - 8)]
-        if row[ord(letter) - ord('a')] != piece:
-            return []
-
-    return [fen]
+    for square_name, piece_symbol in (item.split(':') for item in window.split(';')):
+        square = chess.parse_square(square_name)
+        if piece_symbol == '?':
+            if board.piece_at(square) is not None:
+                return {fen}
+        else:
+            piece = chess.Piece.from_symbol(piece_symbol)
+            if board.piece_at(square) != piece:
+                return {}
+    return {fen}
 
 
 def predict_next_states_with_captures(fen_list, capture_square):
