@@ -1,3 +1,5 @@
+import time
+
 from reconchess import *
 import chess.engine
 
@@ -52,31 +54,58 @@ class MyAgent(Player):
             self.possible_states = random.sample(self.possible_states, max_states)
 
         move_scores = {}
+
         for fen in self.possible_states:
             board = chess.Board(fen)
-            for move in board.legal_moves:
-                score = 0
-                if board.is_capture(move):
-                    captured_piece = board.piece_at(move.to_square)
-                    if captured_piece and captured_piece.piece_type == chess.KING:
-                        # Prioritize capturing the opponent's king
-                        score += 1000
-                    elif captured_piece and captured_piece.piece_type != chess.PAWN:
-                        score += 500
-                    else:
-                        score += 400
-                if board.is_check():
-                    # Prioritize moves that make the king evade capture
-                    if board.turn == self.color:
-                        score += 100
-                    else:
-                        score -= 100
-                move_scores[move.uci()] = move_scores.get(move.uci(), 0) + score
+            if board.is_checkmate():
+                return random.choice(move_actions)
+            else:
+                try:
+                    time_limit = min(1, 10 / len(self.possible_states))
+                    result = self.engine.play(board, chess.engine.Limit(time=time_limit), info=chess.engine.INFO_SCORE)
+                    move = result.move
+                    score = result.info.get("score")  # Get the score from the engine evaluation
 
+                    # Convert the score to a numeric value
+                    if score is not None:
+                        if board.turn == chess.WHITE:
+                            score = score.white().score()
+                        else:
+                            score = score.black().score()
+
+                    if score==None:
+                        score = 0
+
+
+                    # Adjust the score based on your custom scoring system
+                    board.push(move)
+                    if board.is_check():
+                        if board.turn != self.color:
+                            score += 1000  # Prioritize moves that put the opponent's king in check
+                        else:
+                            score -= 1000  # Penalize moves that leave your own king in check
+                    board.pop()
+
+                    if board.is_capture(move):
+                        captured_piece = board.piece_at(move.to_square)
+                        if captured_piece:
+                            if captured_piece.piece_type == chess.KING:
+                                score += 900  # Prioritize capturing the opponent's king
+                            elif captured_piece.piece_type != chess.PAWN:
+                                score += 500  # Prioritize capturing non-pawn pieces
+                            else:
+                                score += 100  # Capturing pawns is less important
+
+                    move_scores[move.uci()] = score
+                except chess.engine.EngineTerminatedError:
+                    # Handle engine termination gracefully
+                    move = random.choice(list(board.legal_moves))
+                    move_scores[move.uci()] = 0
+
+        # If the time limit is not exceeded, continue with the original logic
         valid_moves = [move for move in move_scores if chess.Move.from_uci(move) in move_actions]
-
         if valid_moves:
-            best_move = max(valid_moves, key=move_scores.get)
+            best_move = max(valid_moves, key=lambda move: move_scores.get(move, float('-inf')))
             return chess.Move.from_uci(best_move)
         else:
             # If no valid moves are found, choose a random move from the legal moves
