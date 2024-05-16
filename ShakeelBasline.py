@@ -1,8 +1,5 @@
-import time
-
 from reconchess import *
 import chess.engine
-
 import random
 
 
@@ -68,16 +65,20 @@ class MyAgent(Player):
 
                     # Convert the score to a numeric value
                     if score is not None:
-                        if board.turn == chess.WHITE:
-                            score = score.white().score()
-                        else:
-                            score = score.black().score()
+                        if isinstance(score, chess.engine.PovScore):
+                            if board.turn == chess.WHITE:
+                                score = score.white().score()
+                            else:
+                                score = score.black().score()
+                        elif isinstance(score, chess.engine.MateGivenType):
+                            if board.turn == chess.WHITE:
+                                score = 100000  # Assign a high score for white's mate
+                            else:
+                                score = -100000
 
                     if score==None:
                         score = 0
 
-
-                    # Adjust the score based on your custom scoring system
                     board.push(move)
                     if board.is_check():
                         if board.turn != self.color:
