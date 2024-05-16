@@ -11,37 +11,41 @@ class MyAgent(Player):
         self.board = None
         self.color = None
         self.opponent = None
-        self.possible_states = set()
+        self.possible_states = []
         self.engine = chess.engine.SimpleEngine.popen_uci('./opt/stockfish/stockfish', setpgrp=True)
 
     def handle_game_start(self, color, board, opponent_name):
         self.board = board
         self.color = color
         self.opponent = opponent_name
-        self.possible_states = {board.fen()}
+        self.possible_states = [board.fen()]
 
     def handle_opponent_move_result(self, captured_my_piece, capture_square):
         if captured_my_piece:
             capture_square_name = chess.SQUARE_NAMES[capture_square]
             self.possible_states = predict_next_states_with_captures(self.possible_states, capture_square_name)
         else:
-            self.possible_states = [next_state for state in self.possible_states for next_state, _ in
-                                    nextStatePrediction(state, self.engine, depth=3)]
-
-        # Select a subset of promising states
-        self.possible_states = select_promising_states(self.possible_states, max_states=1000)
+            self.possible_states = [next_state for state in self.possible_states for next_state in
+                                    nextStatePrediction(state)]
 
     def choose_sense(self, sense_actions, move_actions, seconds_left):
-        valid_sense_actions = [square for square in sense_actions if square not in chess.SquareSet(
-            chess.BB_RANK_1 | chess.BB_RANK_8 | chess.BB_FILE_A | chess.BB_FILE_H)]
+        valid_sense_actions = [square for square in sense_actions if square not in [
+            chess.A1, chess.A2, chess.A3, chess.A4, chess.A5, chess.A6, chess.A7, chess.A8,
+            chess.B1, chess.B8,
+            chess.C1, chess.C8,
+            chess.D1, chess.D8,
+            chess.E1, chess.E8,
+            chess.F1, chess.F8,
+            chess.G1, chess.G8,
+            chess.H1, chess.H2, chess.H3, chess.H4, chess.H5, chess.H6, chess.H7, chess.H8
+        ]]
         return random.choice(valid_sense_actions)
 
     def handle_sense_result(self, sense_result):
         window = ";".join(
             [f"{chess.SQUARE_NAMES[square]}:{piece.symbol() if piece else '?'}" for square, piece in sense_result])
-
-        # Filter the possible states based on the current sensing result
-        self.possible_states = [state for state, _ in self.possible_states if nextStateWithSense(state, window)]
+        self.possible_states = [state for fen in self.possible_states for state in
+                                nextStateWithSense(fen, window)]
 
     def choose_move(self, move_actions, seconds_left):
         max_states = 1000  # Limit the number of states to consider
@@ -57,6 +61,9 @@ class MyAgent(Player):
                 try:
                     # Adjust the time limit based on the number of states and remaining time
                     time_limit = min(1, 10 / len(self.possible_states))
+                    # print(f"seconds_left: {seconds_left}")
+                    # print(f"time limit: {10 / len(self.possible_states)}")
+                    # print(f"possible states:{len(self.possible_states)}")
                     result = self.engine.play(board, chess.engine.Limit(time=time_limit), info=chess.engine.INFO_SCORE)
                     move = result.move
                 except chess.engine.EngineTerminatedError:
@@ -72,7 +79,6 @@ class MyAgent(Player):
         else:
             # If no valid moves are found, choose a random move from the legal moves
             return random.choice(move_actions)
-
     def handle_move_result(self, requested_move, taken_move, captured_opponent_piece, capture_square):
         if captured_opponent_piece:
             capture_square_name = chess.SQUARE_NAMES[capture_square]
@@ -85,98 +91,73 @@ class MyAgent(Player):
 
     def handle_game_end(self, winner_color, win_reason, game_history):
         self.engine.quit()
-        if winner_color == self.color:
-            print("Game Over. Shakeel won!")
-        elif winner_color is None:
-            print("Game Over. It was a draw.")
-        else:
-            print("Game Over. Shakeel lost.")
+        # if winner_color == self.color:
+        #     print("Game Over. I won!")
+        # elif winner_color is None:
+        #     print("Game Over. It was a draw.")
+        # else:
+        #     print("Game Over. I lost.")
 
 
-def nextStatePrediction(fen, engine, depth, alpha=-float('inf'), beta=float('inf'), time_limit=0.1):
+def nextStatePrediction(fen):
     board = chess.Board(fen)
-
-    if depth == 0:
-        info = engine.analyse(board, chess.engine.Limit(time=time_limit))
-        score = info["score"].white().score()
-        if score is None:
-            score = 0
-        return [(board.fen(), score)]
-
     next_positions = []
 
     for move in board.legal_moves:
-        board.push(move)
+        temp_board = board.copy()
+        temp_board.push(move)
+        next_positions.append(temp_board.fen())
 
-        # Recursively evaluate the next positions
-        next_pos = nextStatePrediction(board.fen(), engine, depth - 1, -beta, -alpha, time_limit)
-
-        # Negamax score for the current move
-        score = -next_pos[0][1]
-
-        next_positions.append((board.fen(), score))
-
-        board.pop()
-
-        # Update alpha value
-        alpha = max(alpha, score)
-
-        # Alpha-beta pruning
-        if alpha >= beta:
-            break
-
-    # Sort the positions based on the evaluation score in descending order
-    next_positions.sort(key=lambda x: x[1], reverse=True)
-
+    next_positions.sort()
     return next_positions
 
 
 def nextStateWithSense(fen, window):
-    if not isinstance(fen, str):
-        raise TypeError("Expected 'fen' to be a string, got {}".format(type(fen)))
-
     board = chess.Board(fen)
-    for square_name, piece_symbol in (item.split(':') for item in window.split(';')):
-        square = chess.parse_square(square_name)
-        if piece_symbol == '?':
-            if board.piece_at(square) is not None:
-                return False
-        else:
-            piece = chess.Piece.from_symbol(piece_symbol)
-            if board.piece_at(square) != piece:
-                return False
-    return True
+    rows = fen.split('/')
+    rows[-1] = rows[-1].split()[0]
+
+    expanded_rows = []
+    for row in rows:
+        expanded_row = ''
+        for char in row:
+            if char.isdigit():
+                expanded_row += '?' * int(char)
+            else:
+                expanded_row += char
+        expanded_rows.append(expanded_row)
+
+    view = window.split(';')
+    pairs = [square.split(':') for square in view]
+
+    for pair in pairs:
+        location = pair[0]
+        piece = pair[1]
+        letter = location[0]
+        number = location[1]
+        row = expanded_rows[abs(int(number) - 8)]
+        if row[ord(letter) - ord('a')] != piece:
+            return []
+
+    return [fen]
 
 
 def predict_next_states_with_captures(fen_list, capture_square):
-    capture_moves = set()
+    capture_moves = []
     for fen in fen_list:
         board = chess.Board(fen)
         try:
             capture_square_index = chess.parse_square(capture_square)
-            for move in board.generate_legal_captures():
+            for move in board.legal_moves:
                 if move.to_square == capture_square_index and board.is_capture(move):
                     board.push(move)
-                    capture_moves.add(board.fen())
+                    capture_moves.append(board.fen())
                     board.pop()
         except ValueError:
             # Handle invalid capture_square gracefully
             pass
-
+    capture_moves.sort()
     return capture_moves
-
-
-def select_promising_states(states, max_states):
-    if len(states) <= max_states:
-        return states
-
-    # Sort the states based on their evaluation scores
-    sorted_states = sorted(states, key=lambda x: x[1], reverse=True)
-
-    # Select the top max_states promising states
-    promising_states = sorted_states[:max_states]
-
-    return [state for state, _ in promising_states]
 
 
 def execute_move(fen, move):
