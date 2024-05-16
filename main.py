@@ -2,7 +2,7 @@ import os
 import itertools
 
 # List of bot names
-bots = ["RBC1.py", "rand.py", "trout.py", "reconchess.bots.random_bot"]
+bots = ["ImprovedAgent.py", "RandomSensing.py", "trout.py", "reconchess.bots.random_bot"]
 
 # Generate all unique pairings of bots
 pairings = list(itertools.combinations(bots, 2))
