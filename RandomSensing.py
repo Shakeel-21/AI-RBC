@@ -48,27 +48,25 @@ class MyAgent(Player):
                                 nextStateWithSense(fen, window)]
 
     def choose_move(self, move_actions, seconds_left):
-        max_states = 1000  # Limit the number of states to consider
+        max_states = 10000  # Limit the number of states to consider
         if len(self.possible_states) > max_states:
             self.possible_states = random.sample(self.possible_states, max_states)
 
         move_counter = Counter()
         for fen in self.possible_states:
             board = chess.Board(fen)
-            if board.is_checkmate():
-                move = list(board.legal_moves)[0]
-            else:
-                try:
-                    # Adjust the time limit based on the number of states and remaining time
-                    time_limit = min(1, 10 / len(self.possible_states))
-                    # print(f"seconds_left: {seconds_left}")
-                    # print(f"time limit: {10 / len(self.possible_states)}")
-                    # print(f"possible states:{len(self.possible_states)}")
-                    result = self.engine.play(board, chess.engine.Limit(time=time_limit), info=chess.engine.INFO_SCORE)
-                    move = result.move
-                except chess.engine.EngineTerminatedError:
-                    # Handle engine termination gracefully
-                    move = random.choice(list(board.legal_moves))
+
+            try:
+                # Adjust the time limit based on the number of states and remaining time
+                time_limit = min(1, 10 / len(self.possible_states))
+                # print(f"seconds_left: {seconds_left}")
+                # print(f"time limit: {10 / len(self.possible_states)}")
+                # print(f"possible states:{len(self.possible_states)}")
+                result = self.engine.play(board, chess.engine.Limit(time=time_limit), info=chess.engine.INFO_SCORE)
+                move = result.move
+            except chess.engine.EngineTerminatedError:
+                # Handle engine termination gracefully
+                move = random.choice(list(board.legal_moves))
             move_counter[move.uci()] += 1
 
         valid_moves = [move for move in move_counter if chess.Move.from_uci(move) in move_actions]

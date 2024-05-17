@@ -1,7 +1,7 @@
 from reconchess import *
 import chess.engine
 import random
-
+from collections import Counter
 
 class MyAgent(Player):
     def __init__(self):
@@ -9,11 +9,13 @@ class MyAgent(Player):
         self.color = None
         self.opponent = None
         self.my_piece_captured_square = None
+        self.count = None
         self.possible_states = set()
         self.engine = chess.engine.SimpleEngine.popen_uci('./opt/stockfish/stockfish', setpgrp=True)
 
     def handle_game_start(self, color, board, opponent_name):
         self.board = board
+        self.count = 0
         self.color = color
         self.opponent = opponent_name
         self.possible_states = {board.fen()}
@@ -25,8 +27,7 @@ class MyAgent(Player):
             capture_square_name = chess.SQUARE_NAMES[capture_square]
             self.possible_states = predict_next_states_with_captures(self.possible_states, capture_square_name)
         else:
-            self.possible_states = [next_state for state in self.possible_states for next_state in
-                                    nextStatePrediction(state)]
+            self.possible_states = [next_state for state in self.possible_states for next_state in nextStatePrediction(state)]
 
     def choose_sense(self, sense_actions, move_actions, seconds_left):
         valid_sense_actions = [square for square in sense_actions if square not in chess.SquareSet(
@@ -35,7 +36,6 @@ class MyAgent(Player):
         if self.my_piece_captured_square:
             return self.my_piece_captured_square
 
-            # if we might capture a piece when we move, sense where the capture will occur
         future_move = self.choose_move(move_actions, seconds_left)
         if future_move is not None and self.board.piece_at(future_move.to_square) is not None:
             return future_move.to_square
@@ -44,7 +44,23 @@ class MyAgent(Player):
             if piece.color == self.color and square in valid_sense_actions:
                 valid_sense_actions.remove(square)
 
-        # If no last move or the last move is not in the valid sense actions, choose a random sense action
+        if self.count < 4:
+            if self.color == chess.WHITE:
+                valid_sense_actions = [chess.C7, chess.F7]
+            else:
+                valid_sense_actions = [chess.C2, chess.F2]
+        elif self.count < 10:
+            if self.color == chess.WHITE:
+                valid_sense_actions = [square for square in sense_actions if square not in chess.SquareSet(
+                    chess.BB_RANK_1 | chess.BB_RANK_8 | chess.BB_RANK_2 | chess.BB_RANK_3 | chess.BB_FILE_A | chess.BB_FILE_H)]
+            else:
+                valid_sense_actions = [square for square in sense_actions if square not in chess.SquareSet(
+                    chess.BB_RANK_1 | chess.BB_RANK_8 | chess.BB_RANK_7 | chess.BB_RANK_6 | chess.BB_FILE_A | chess.BB_FILE_H)]
+        elif self.count < 20:
+            if self.color == chess.WHITE:
+                valid_sense_actions = [square for square in sense_actions if square not in chess.SquareSet(
+                    chess.BB_RANK_1 | chess.BB_RANK_2 | chess.BB_FILE_A | chess.BB_FILE_H)]
+
         return random.choice(valid_sense_actions)
 
     def handle_sense_result(self, sense_result):
@@ -53,8 +69,27 @@ class MyAgent(Player):
 
         window = ";".join(
             [f"{chess.SQUARE_NAMES[square]}:{piece.symbol() if piece else '?'}" for square, piece in sense_result])
-        self.possible_states = [state for fen in self.possible_states for state in
-                                nextStateWithSense(fen, window)]
+        self.possible_states = [state for fen in self.possible_states for state in nextStateWithSense(fen, window)]
+
+    def select_common_move(self, move_actions):
+        move_counter = Counter()
+        for fen in self.possible_states:
+            board = chess.Board(fen)
+
+            time_limit = min(2, 10 / len(self.possible_states))
+            result = self.engine.play(board, chess.engine.Limit(time=time_limit), info=chess.engine.INFO_SCORE)
+            move = result.move
+
+            if move is None or move not in move_actions or not self.board.is_legal(move):
+                continue
+
+            move_counter[move.uci()] += 1
+
+        if not move_counter:
+            return random.choice(list(move_actions))
+
+        most_common_move = sorted(move_counter.items(), key=lambda x: (-x[1], x[0]))[0][0]
+        return chess.Move.from_uci(most_common_move)
 
     def choose_move(self, move_actions, seconds_left):
         enemy_king_square = self.board.king(not self.color)
@@ -84,7 +119,6 @@ class MyAgent(Player):
 
                 if move is None:
                     continue
-
 
                 score = 0
 
@@ -191,7 +225,6 @@ def predict_next_states_with_captures(fen_list, capture_square):
                     capture_moves.add(board.fen())
                     board.pop()
         except ValueError:
-            # Handle invalid capture_square gracefully
             pass
 
     return capture_moves
