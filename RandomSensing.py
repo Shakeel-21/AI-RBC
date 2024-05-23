@@ -6,7 +6,7 @@ import os
 import random
 
 
-class MyAgent(Player):
+class RandomSensing(Player):
     def __init__(self):
         self.board = None
         self.color = None
@@ -47,36 +47,37 @@ class MyAgent(Player):
         self.possible_states = [state for fen in self.possible_states for state in
                                 nextStateWithSense(fen, window)]
 
+    def select_common_move(self, move_actions):
+        move_counter = Counter()
+        for fen in self.possible_states:
+            board = chess.Board(fen)
+
+            time_limit = min(2.0, 10 / len(self.possible_states))
+            result = self.engine.play(board, chess.engine.Limit(time=time_limit), info=chess.engine.INFO_SCORE)
+            move = result.move
+
+            if move is None or move not in move_actions or not self.board.is_legal(move):
+                continue
+
+            move_counter[move.uci()] += 1
+
+        if not move_counter:
+            return []
+
+        sorted_moves = sorted(move_counter.items(), key=lambda x: (-x[1], x[0]))
+        return [chess.Move.from_uci(move[0]) for move in sorted_moves]
     def choose_move(self, move_actions, seconds_left):
         max_states = 10000  # Limit the number of states to consider
         if len(self.possible_states) > max_states:
             self.possible_states = random.sample(self.possible_states, max_states)
 
-        move_counter = Counter()
-        for fen in self.possible_states:
-            board = chess.Board(fen)
+        common_moves = self.select_common_move(move_actions)
 
-            try:
-                # Adjust the time limit based on the number of states and remaining time
-                time_limit = min(1, 10 / len(self.possible_states))
-                # print(f"seconds_left: {seconds_left}")
-                # print(f"time limit: {10 / len(self.possible_states)}")
-                # print(f"possible states:{len(self.possible_states)}")
-                result = self.engine.play(board, chess.engine.Limit(time=time_limit), info=chess.engine.INFO_SCORE)
-                move = result.move
-            except chess.engine.EngineTerminatedError:
-                # Handle engine termination gracefully
-                move = random.choice(list(board.legal_moves))
-            move_counter[move.uci()] += 1
+        for move in common_moves:
+            if self.board.is_legal(move):
+                return move
 
-        valid_moves = [move for move in move_counter if chess.Move.from_uci(move) in move_actions]
-
-        if valid_moves:
-            most_common_move = max(valid_moves, key=move_counter.get)
-            return chess.Move.from_uci(most_common_move)
-        else:
-            # If no valid moves are found, choose a random move from the legal moves
-            return random.choice(move_actions)
+        return random.choice(move_actions)
     def handle_move_result(self, requested_move, taken_move, captured_opponent_piece, capture_square):
         if captured_opponent_piece:
             capture_square_name = chess.SQUARE_NAMES[capture_square]
@@ -89,12 +90,12 @@ class MyAgent(Player):
 
     def handle_game_end(self, winner_color, win_reason, game_history):
         self.engine.quit()
-        # if winner_color == self.color:
-        #     print("Game Over. I won!")
-        # elif winner_color is None:
-        #     print("Game Over. It was a draw.")
-        # else:
-        #     print("Game Over. I lost.")
+        if winner_color == self.color:
+            print("Game Over. Random won!")
+        elif winner_color is None:
+            print("Game Over. It was a draw.")
+        else:
+            print("Game Over. Random lost.")
 
 
 def nextStatePrediction(fen):

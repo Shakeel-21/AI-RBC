@@ -38,7 +38,7 @@ class ImprovedAgent(Player):
         if self.my_piece_captured_square:
             return self.my_piece_captured_square
 
-        future_move = self.future_move(move_actions, seconds_left)
+        future_move = self.choose_move(move_actions, seconds_left)
         if future_move is not None and self.board.piece_at(future_move.to_square) is not None:
             return future_move.to_square
 
@@ -48,9 +48,9 @@ class ImprovedAgent(Player):
 
         if self.count < 4:
             if self.color == chess.WHITE:
-                valid_sense_actions = [chess.B7, chess.C7, chess.D7, chess.F7, chess.G7]
+                valid_sense_actions = [chess.C7, chess.F7]
             else:
-                valid_sense_actions = [chess.B2, chess.C2, chess.D2, chess.F2, chess.G2]
+                valid_sense_actions = [chess.C2, chess.F2]
         elif self.count < 10:
             if self.color == chess.WHITE:
                 valid_sense_actions = [square for square in sense_actions if square not in chess.SquareSet(
@@ -58,13 +58,6 @@ class ImprovedAgent(Player):
             else:
                 valid_sense_actions = [square for square in sense_actions if square not in chess.SquareSet(
                     chess.BB_RANK_1 | chess.BB_RANK_8 | chess.BB_RANK_7 | chess.BB_RANK_6 | chess.BB_FILE_A | chess.BB_FILE_H)]
-        elif self.count < 20:
-            if self.color == chess.WHITE:
-                valid_sense_actions = [square for square in sense_actions if square not in chess.SquareSet(
-                    chess.BB_RANK_1 | chess.BB_RANK_8 | chess.BB_RANK_2 | chess.BB_FILE_A | chess.BB_FILE_H)]
-            else:
-                valid_sense_actions = [square for square in sense_actions if square not in chess.SquareSet(
-                    chess.BB_RANK_8 | chess.BB_RANK_7 | chess.BB_RANK_1 | chess.BB_FILE_A | chess.BB_FILE_H)]
 
         return random.choice(valid_sense_actions)
 
@@ -95,30 +88,6 @@ class ImprovedAgent(Player):
 
         most_common_move = sorted(move_counter.items(), key=lambda x: (-x[1], x[0]))[0][0]
         return chess.Move.from_uci(most_common_move)
-
-    def future_move(self, move_actions: List[chess.Move], seconds_left: float) -> Optional[chess.Move]:
-        # if we might be able to take the king, try to
-        enemy_king_square = self.board.king(not self.color)
-        if enemy_king_square:
-            # if there are any ally pieces that can take king, execute one of those moves
-            enemy_king_attackers = self.board.attackers(self.color, enemy_king_square)
-            if enemy_king_attackers:
-                attacker_square = enemy_king_attackers.pop()
-                return chess.Move(attacker_square, enemy_king_square)
-
-        # otherwise, try to move with the stockfish chess engine
-        try:
-            self.board.turn = self.color
-            self.board.clear_stack()
-            result = self.engine.play(self.board, chess.engine.Limit(time=0.1))
-            return result.move
-        except chess.engine.EngineTerminatedError:
-            print('Stockfish Engine died')
-        except chess.engine.EngineError:
-            print('Stockfish Engine bad state at "{}"'.format(self.board.fen()))
-
-        # if all else fails, pass
-        return None
 
     def choose_move(self, move_actions, seconds_left):
         enemy_king_square = self.board.king(not self.color)
@@ -185,14 +154,10 @@ class ImprovedAgent(Player):
                 move_scores[move.uci()] = 0
 
         # If the time limit is not exceeded, continue with the original logic
-        valid_moves = [chess.Move.from_uci(move) for move in move_scores if chess.Move.from_uci(move) in move_actions]
+        valid_moves = [move for move in move_scores if chess.Move.from_uci(move) in move_actions]
         if valid_moves:
-            sorted_moves = sorted(valid_moves, key=lambda move: move_scores.get(move.uci(), float('-inf')),
-                                  reverse=True)
-
-            for move in sorted_moves:
-                if self.board.is_legal(move):
-                    return move
+            best_move = max(valid_moves, key=lambda move: move_scores.get(move, float('-inf')))
+            return chess.Move.from_uci(best_move)
         else:
             # If no valid moves are found, choose a random move from the legal moves
             return random.choice(move_actions)
