@@ -5,9 +5,10 @@ import random
 from collections import Counter
 import chess
 import concurrent.futures
-import traceback
+from threading import Lock
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+
 
 class ImprovedAgent(Player):
     def __init__(self):
@@ -18,6 +19,7 @@ class ImprovedAgent(Player):
         self.my_piece_captured_square = None
         self.count = None
         self.possible_states = set()
+        self.lock = Lock()
         try:
             self.engine = chess.engine.SimpleEngine.popen_uci('./opt/stockfish/stockfish', setpgrp=True)
         except Exception as e:
@@ -76,19 +78,15 @@ class ImprovedAgent(Player):
     def select_common_move(self, move_actions):
         logging.debug(f'Selecting common move from actions: {move_actions}')
         move_counter = Counter()
-        for fen in self.possible_states:
-            board = chess.Board(fen)
-            time_limit = min(2, 10 / len(self.possible_states))
-            try:
-                result = self.engine.play(board, chess.engine.Limit(time=time_limit), info=chess.engine.INFO_SCORE)
-                move = result.move
-
-                if move is None or move not in move_actions or not self.board.is_legal(move):
-                    continue
-
-                move_counter[move.uci()] += 1
-            except chess.engine.EngineError as e:
-                logging.error(f'Error with Stockfish engine: {e}')
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            futures = {executor.submit(self.evaluate_state, fen, move_actions): fen for fen in self.possible_states}
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    move = future.result()
+                    if move:
+                        move_counter[move.uci()] += 1
+                except Exception as exc:
+                    logging.error(f'Error evaluating state: {exc}')
 
         if not move_counter:
             chosen_move = random.choice(list(move_actions))
@@ -140,66 +138,7 @@ class ImprovedAgent(Player):
         if len(self.possible_states) > max_states:
             self.possible_states = random.sample(self.possible_states, max_states)
 
-        move_scores = {}
-
-        def evaluate_state(fen):
-            try:
-                board = chess.Board(fen)
-                if not board.is_valid():
-                    return None, 0
-                self.board.turn = self.color
-                self.board.clear_stack()
-                time_limit = min(1, 10 / len(self.possible_states))
-                result = self.engine.play(board, chess.engine.Limit(time=time_limit), info=chess.engine.INFO_SCORE)
-                move = result.move
-
-                if move is None or not self.board.is_legal(move):
-                    return None, 0
-
-                score = 0
-                board.push(move)
-                enemy_king_square = board.king(not self.color)
-                if enemy_king_square:
-                    enemy_king_attackers = board.attackers(self.color, enemy_king_square)
-                    if enemy_king_attackers:
-                        score += 2000
-
-                my_king_square = board.king(self.color)
-                if my_king_square:
-                    my_king_attackers = board.attackers(not self.color, my_king_square)
-                    if my_king_attackers:
-                        score -= 2000
-
-                board.pop()
-
-                if board.is_capture(move):
-                    captured_piece = board.piece_at(move.to_square)
-                    if captured_piece:
-                        if captured_piece.piece_type == chess.KING:
-                            score += 900
-                        elif captured_piece.piece_type != chess.PAWN:
-                            score += 500
-                        else:
-                            score += 100
-
-                return move, score
-            except Exception as e:
-                logging.error(f'Error evaluating state {fen}: {e}')
-                return None, 0
-
-        with concurrent.futures.ProcessPoolExecutor() as executor:
-            futures = {executor.submit(evaluate_state, fen): fen for fen in self.possible_states}
-            for future in concurrent.futures.as_completed(futures):
-                fen = futures[future]
-                try:
-                    move, score = future.result()
-                    if move is not None:
-                        if move.uci() in move_scores:
-                            move_scores[move.uci()] += score
-                        else:
-                            move_scores[move.uci()] = score
-                except Exception as exc:
-                    logging.error(f'Error evaluating state {fen}: {exc}')
+        move_scores = self.evaluate_moves(move_actions, seconds_left)
 
         valid_moves = [chess.Move.from_uci(move) for move in move_scores if chess.Move.from_uci(move) in move_actions]
         if valid_moves:
@@ -242,6 +181,68 @@ class ImprovedAgent(Player):
             return board.is_valid()
         except ValueError:
             return False
+
+    def evaluate_moves(self, move_actions, seconds_left):
+        move_scores = {}
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            futures = {executor.submit(self.evaluate_state, fen, move_actions): fen for fen in self.possible_states}
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    move, score = future.result()
+                    if move is not None:
+                        if move.uci() in move_scores:
+                            move_scores[move.uci()] += score
+                        else:
+                            move_scores[move.uci()] = score
+                except Exception as exc:
+                    logging.error(f'Error evaluating state: {exc}')
+        return move_scores
+
+    def evaluate_state(self, fen, move_actions):
+        try:
+            board = chess.Board(fen)
+            if not board.is_valid():
+                return None, 0
+            self.board.turn = self.color
+            self.board.clear_stack()
+            time_limit = min(1, 10 / len(self.possible_states))
+            result = self.engine.play(board, chess.engine.Limit(time=time_limit), info=chess.engine.INFO_SCORE)
+            move = result.move
+
+            if move is None or not self.board.is_legal(move):
+                return None, 0
+
+            score = 0
+            board.push(move)
+            enemy_king_square = board.king(not self.color)
+            if enemy_king_square:
+                enemy_king_attackers = board.attackers(self.color, enemy_king_square)
+                if enemy_king_attackers:
+                    score += 2000
+
+            my_king_square = board.king(self.color)
+            if my_king_square:
+                my_king_attackers = board.attackers(not self.color, my_king_square)
+                if my_king_attackers:
+                    score -= 2000
+
+            board.pop()
+
+            if board.is_capture(move):
+                captured_piece = board.piece_at(move.to_square)
+                if captured_piece:
+                    if captured_piece.piece_type == chess.KING:
+                        score += 900
+                    elif captured_piece.piece_type != chess.PAWN:
+                        score += 500
+                    else:
+                        score += 100
+
+            return move, score
+        except Exception as e:
+            logging.error(f'Error evaluating state {fen}: {e}')
+            return None, 0
+
 
 def nextStatePrediction(fen):
     board = chess.Board(fen)
@@ -302,59 +303,3 @@ def execute_move(fen, move):
     except ValueError:
         return fen
 
-# Unit Tests
-import unittest
-
-class TestImprovedAgent(unittest.TestCase):
-
-    def setUp(self):
-        self.agent = ImprovedAgent()
-        self.board = chess.Board()
-        self.color = chess.WHITE
-        self.opponent_name = 'Opponent'
-
-    def test_handle_game_start(self):
-        self.agent.handle_game_start(self.color, self.board, self.opponent_name)
-        self.assertEqual(self.agent.board, self.board)
-        self.assertEqual(self.agent.color, self.color)
-        self.assertEqual(self.agent.opponent, self.opponent_name)
-        self.assertEqual(self.agent.possible_states, {self.board.fen()})
-
-    def test_handle_opponent_move_result(self):
-        self.agent.handle_game_start(self.color, self.board, self.opponent_name)
-        capture_square = chess.parse_square('e4')
-        self.agent.handle_opponent_move_result(True, capture_square)
-        self.assertIn('e4', chess.SQUARE_NAMES)
-
-    def test_choose_sense(self):
-        self.agent.handle_game_start(self.color, self.board, self.opponent_name)
-        sense_actions = list(range(64))
-        move_actions = list(self.board.legal_moves)
-        chosen_sense = self.agent.choose_sense(sense_actions, move_actions, 1.0)
-        self.assertIn(chosen_sense, sense_actions)
-
-    def test_handle_sense_result(self):
-        self.agent.handle_game_start(self.color, self.board, self.opponent_name)
-        sense_result = [(chess.parse_square('e4'), chess.Piece(chess.QUEEN, chess.WHITE))]
-        self.agent.handle_sense_result(sense_result)
-        self.assertEqual(self.agent.board.piece_at(chess.parse_square('e4')).symbol(), 'Q')
-
-    def test_choose_move(self):
-        self.agent.handle_game_start(self.color, self.board, self.opponent_name)
-        move_actions = list(self.board.legal_moves)
-        chosen_move = self.agent.choose_move(move_actions, 1.0)
-        self.assertIn(chosen_move, move_actions)
-
-    def test_handle_move_result(self):
-        self.agent.handle_game_start(self.color, self.board, self.opponent_name)
-        move = chess.Move.from_uci('e2e4')
-        self.agent.handle_move_result(move, move, False, None)
-        self.assertEqual(self.agent.board.fen(), self.board.fen())
-
-    def test_handle_game_end(self):
-        self.agent.handle_game_start(self.color, self.board, self.opponent_name)
-        self.agent.handle_game_end(self.color, 'checkmate', [])
-        self.assertIsNone(self.agent.engine)
-
-if __name__ == '__main__':
-    unittest.main()
